@@ -32,7 +32,6 @@
 
     #ticket-list { list-style: none; overflow-y: auto; padding: 12px; flex: 1; display: flex; flex-direction: column; gap: 10px; }
     
-    /* TICKET STUB DESIGN */
     .ticket-card {
       display: flex;
       background: var(--card-bg);
@@ -61,7 +60,6 @@
       font-weight: 900;
       color: var(--accent);
       background: rgba(0,0,0,0.2);
-      position: relative;
     }
 
     /* RIGHT WORKSPACE CONSOLE */
@@ -140,7 +138,6 @@
 </head>
 <body>
 
-  <!-- LEFT COLUMN -->
   <aside class="sidebar">
     <div class="sidebar-header">
       <h2>Available Seats</h2>
@@ -154,7 +151,6 @@
     </ul>
   </aside>
 
-  <!-- RIGHT COLUMN -->
   <main class="workspace">
     <div class="console">
       
@@ -185,7 +181,6 @@
   </main>
 
   <script>
-    // Supabase project credentials
     const SUPABASE_URL = "https://capwxcexfrrerttbwdut.supabase.co";
     const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNhcHd4Y2V4ZnJyZXJ0dGJ3ZHV0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODgzNDE4OTksImV4cCI6MjEwMzkxNzg5OX0.aTZpr1nBPjcdeG85fE3uspOR6-md9YeZc-CAtvvCJLA";
 
@@ -203,7 +198,6 @@
     let currentTicket = null;
     let localClaims = JSON.parse(localStorage.getItem('snipe_claims') || '{}');
 
-    // Persistence of credentials
     inputPhone.value = localStorage.getItem('snipe_phone') || '';
     inputEmail.value = localStorage.getItem('snipe_email') || '';
 
@@ -260,7 +254,6 @@
 
       btnQr.disabled = false;
 
-      // Auto restore if already claimed locally
       if (localClaims[ticket.transaction_id]) {
         showQR(localClaims[ticket.transaction_id].qrUrl);
       } else {
@@ -280,16 +273,18 @@
       if (!currentTicket) return;
       const tid = currentTicket.transaction_id;
 
-      if (currentTicket.upi_qr_image) {
-        localClaims[tid] = { qrUrl: currentTicket.upi_qr_image, claimedAt: Date.now() };
-        localStorage.setItem('snipe_claims', JSON.stringify(localClaims));
-        sbClient.from('tickets').update({ status: 'CLAIMED' }).eq('transaction_id', tid).then();
-        showQR(currentTicket.upi_qr_image);
-      } else {
-        const p = inputPhone.value.trim();
-        const e = inputEmail.value.trim();
-        window.open(`https://in.bookmyshow.com/checkout?transId=${tid}&phone=${p}&email=${e}`, '_blank');
+      // Prioritize pre-generated QR from runner; fallback to dynamic VPA schema
+      let qrUrlToDisplay = currentTicket.upi_qr_image;
+      if (!qrUrlToDisplay) {
+        const fallbackIntent = `upi://pay?pa=bookmyshow@icici&pn=BookMyShow&tr=${tid}&tn=BMS_${tid}&cu=INR`;
+        qrUrlToDisplay = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(fallbackIntent)}`;
       }
+
+      localClaims[tid] = { qrUrl: qrUrlToDisplay, claimedAt: Date.now() };
+      localStorage.setItem('snipe_claims', JSON.stringify(localClaims));
+      sbClient.from('tickets').update({ status: 'CLAIMED' }).eq('transaction_id', tid).then();
+
+      showQR(qrUrlToDisplay);
     };
 
     async function init() {
@@ -306,7 +301,6 @@
         });
       }
 
-      // Live Supabase Channel
       sbClient.channel('dashboard-feed')
         .on('postgres_changes', { event: '*', schema: 'public', table: 'tickets' }, payload => {
           if (payload.eventType === 'INSERT' && payload.new.status === 'AVAILABLE') {
