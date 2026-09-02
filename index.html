@@ -168,27 +168,28 @@
       }
     }
 
-    function initRealtimeListener() {
-      supabase
-        .channel('tickets-feed')
-        .on(
-          'postgres_changes',
-          { event: 'INSERT', schema: 'public', table: 'tickets' },
-          (payload) => {
-            console.log("🔥 New Snipe Locked:", payload.new);
-            addTicketToUI(payload.new);
-          }
-        )
-        .subscribe((status) => {
-          if (status === 'SUBSCRIBED') {
-            statusBadge.innerText = "● Live WebSocket Connected";
-            statusBadge.className = "text-xs font-mono px-3 py-1 rounded bg-green-500/10 text-green-400 border border-green-500/20";
-          } else if (status === 'CLOSED') {
-            statusBadge.innerText = "Disconnected";
-            statusBadge.className = "text-xs font-mono px-3 py-1 rounded bg-red-500/10 text-red-400 border border-red-500/20";
-          }
-        });
-    }
+function initRealtimeListener() {
+  const channel = supabase
+    .channel('tickets-feed')
+    .on(
+      'postgres_changes',
+      { event: 'INSERT', schema: 'public', table: 'tickets' },
+      (payload) => {
+        console.log("🔥 New Snipe Locked:", payload.new);
+        addTicketToUI(payload.new);
+      }
+    )
+    .subscribe((status, err) => {
+      console.log("Realtime status:", status, err);
+      if (status === 'SUBSCRIBED') {
+        statusBadge.innerText = "● Live WebSocket Connected";
+        statusBadge.className = "text-xs font-mono px-3 py-1 rounded bg-green-500/10 text-green-400 border border-green-500/20";
+      } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+        statusBadge.innerText = "Connection Error";
+        statusBadge.className = "text-xs font-mono px-3 py-1 rounded bg-red-500/10 text-red-400 border border-red-500/20";
+      }
+    });
+}
 
     loadInitialTickets();
     initRealtimeListener();
