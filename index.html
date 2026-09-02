@@ -3,205 +3,253 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>BMS Grabroom Live Terminal</title>
-  <script src="https://cdn.tailwindcss.com"></script>
+  <title>BMS Grabroom Terminal</title>
   <script src="https://unpkg.com/@supabase/supabase-js@2.39.8/dist/umd/supabase.js"></script>
   <style>
-    @keyframes pulse-card {
-      0%, 100% { border-color: rgba(239, 68, 68, 0.4); }
-      50% { border-color: rgba(239, 68, 68, 1); box-shadow: 0 0 20px rgba(239, 68, 68, 0.4); }
+    :root {
+      --bg-main: #140a0c;
+      --panel-bg: #1c0e11;
+      --card-bg: #231216;
+      --card-active: #2c161b;
+      --border: #361b21;
+      --accent: #c49756;
+      --accent-hover: #d8aa68;
+      --text: #ecdcd9;
+      --muted: #8a7376;
+      --green: #22c55e;
+      --red: #ef4444;
     }
-    .new-arrival { animation: pulse-card 1.5s infinite; }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    body { background: var(--bg-main); color: var(--text); height: 100vh; display: flex; overflow: hidden; }
+
+    /* LEFT SIDEBAR */
+    .sidebar { width: 320px; border-right: 1px solid var(--border); background: var(--panel-bg); display: flex; flex-direction: column; flex-shrink: 0; }
+    .sidebar-header { padding: 18px 20px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
+    .sidebar-header h2 { font-size: 11px; font-weight: 700; letter-spacing: 2px; color: var(--muted); text-transform: uppercase; }
+    .live-tag { display: flex; align-items: center; gap: 6px; font-size: 10px; font-weight: 700; color: var(--accent); letter-spacing: 1px; }
+    .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+
+    #ticket-list { list-style: none; overflow-y: auto; padding: 12px; flex: 1; display: flex; flex-direction: column; gap: 8px; }
+    .ticket-card { display: flex; background: var(--card-bg); border: 1px solid var(--border); border-radius: 6px; cursor: pointer; transition: 0.2s; overflow: hidden; position: relative; }
+    .ticket-card:hover { border-color: var(--accent); }
+    .ticket-card.active { border-color: var(--accent); background: var(--card-active); }
+    .ticket-main { padding: 12px; flex: 1; }
+    .t-meta { font-size: 9px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; display: flex; justify-content: space-between; }
+    .t-title { font-size: 13px; font-weight: bold; color: #fff; margin-bottom: 4px; }
+    .t-sub { font-size: 10px; color: var(--muted); }
+    .ticket-seat-badge { width: 64px; border-left: 1px dashed var(--border); display: flex; align-items: center; justify-content: center; font-size: 20px; font-weight: 900; color: var(--accent); background: rgba(0,0,0,0.15); }
+
+    /* MAIN CONTENT */
+    .workspace { flex: 1; display: flex; justify-content: center; align-items: center; padding: 40px; }
+    .console { width: 100%; max-width: 520px; display: flex; flex-direction: column; align-items: center; }
+
+    .target-card { width: 100%; display: flex; background: var(--card-bg); border: 1px dashed var(--border); border-radius: 8px; margin-bottom: 24px; min-height: 90px; }
+    .target-card.empty { justify-content: center; align-items: center; color: var(--muted); font-size: 12px; border-style: dashed; }
+    .target-main { padding: 16px; flex: 1; }
+    .target-seat { width: 90px; border-left: 1px dashed var(--border); display: flex; align-items: center; justify-content: center; font-size: 32px; font-weight: 900; color: var(--accent); }
+
+    .form-grid { width: 100%; display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 16px; }
+    .field label { display: block; font-size: 9px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px; }
+    .field input { width: 100%; background: var(--card-bg); border: 1px solid var(--border); padding: 10px 12px; border-radius: 6px; color: #fff; font-size: 12px; outline: none; }
+    .field input:focus { border-color: var(--accent); }
+
+    .btn-pay { width: 100%; background: var(--accent); color: #140a0c; font-weight: 800; font-size: 12px; letter-spacing: 1px; text-transform: uppercase; padding: 14px; border: none; border-radius: 6px; cursor: pointer; transition: 0.2s; }
+    .btn-pay:hover:not(:disabled) { background: var(--accent-hover); }
+    .btn-pay:disabled { opacity: 0.3; cursor: not-allowed; }
+
+    .qr-box { margin-top: 24px; display: none; flex-direction: column; align-items: center; }
+    .qr-box img { width: 220px; height: 220px; background: #fff; padding: 10px; border-radius: 6px; }
+    .qr-note { font-size: 11px; color: var(--muted); margin-top: 10px; }
+    .status-alert { font-size: 11px; color: var(--accent); margin-top: 12px; min-height: 16px; }
   </style>
 </head>
-<body class="bg-gray-950 text-gray-100 min-h-screen font-sans antialiased selection:bg-red-600 selection:text-white">
+<body>
 
-  <!-- TOP HEADER -->
-  <header class="border-b border-gray-800 bg-gray-900/60 backdrop-blur sticky top-0 z-50">
-    <div class="max-w-7xl mx-auto px-4 sm:px-6 py-4 flex items-center justify-between">
-      <div class="flex items-center space-x-3">
-        <div class="h-3 w-3 rounded-full bg-red-600 animate-ping"></div>
-        <h1 class="text-xl font-black tracking-wider uppercase">BMS Grabroom <span class="text-xs bg-red-600/20 text-red-400 border border-red-500/30 px-2 py-0.5 rounded ml-2">Live</span></h1>
-      </div>
-      <div id="connection-status" class="text-xs font-mono px-3 py-1 rounded bg-yellow-500/10 text-yellow-400 border border-yellow-500/20">
-        Connecting to Supabase...
+  <aside class="sidebar">
+    <div class="sidebar-header">
+      <h2>Available Seats</h2>
+      <div class="live-tag">
+        <span class="dot"></span>
+        <span id="conn-state">LIVE</span>
       </div>
     </div>
-  </header>
+    <ul id="ticket-list">
+      <li style="padding: 20px; text-align: center; color: var(--muted); font-size: 11px;">Scanning for snipes...</li>
+    </ul>
+  </aside>
 
-  <!-- MAIN DASHBOARD -->
-  <main class="max-w-7xl mx-auto px-4 sm:px-6 py-8">
-    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
-      <div class="bg-gray-900/80 border border-gray-800 rounded-xl p-4">
-        <p class="text-xs text-gray-400 uppercase tracking-wider font-semibold">Active Holds</p>
-        <p id="stat-active" class="text-2xl font-black text-white mt-1">0</p>
+  <main class="workspace">
+    <div class="console">
+      
+      <div id="target-display" class="target-card empty">
+        Select a seat from the left to begin
       </div>
-      <div class="bg-gray-900/80 border border-gray-800 rounded-xl p-4">
-        <p class="text-xs text-gray-400 uppercase tracking-wider font-semibold">Total Sniped</p>
-        <p id="stat-total" class="text-2xl font-black text-red-500 mt-1">0</p>
-      </div>
-      <div class="bg-gray-900/80 border border-gray-800 rounded-xl p-4">
-        <p class="text-xs text-gray-400 uppercase tracking-wider font-semibold">Target Venue</p>
-        <p class="text-2xl font-black text-gray-200 mt-1">ALUC</p>
-      </div>
-    </div>
 
-    <div class="flex items-center justify-between mb-4">
-      <h2 class="text-lg font-bold tracking-wide">Live Reservations</h2>
-      <span class="text-xs text-gray-500 font-mono">Hold Window: ~8-10 Minutes</span>
-    </div>
-
-    <div id="tickets-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-      <div id="empty-state" class="col-span-full py-20 text-center border-2 border-dashed border-gray-800 rounded-2xl bg-gray-900/20">
-        <div class="text-4xl mb-3">🎯</div>
-        <p class="text-gray-400 font-medium">Waiting for sniper to lock seats...</p>
-        <p class="text-xs text-gray-600 mt-1 font-mono">When a ticket is locked, ntfy will ping your phone to open this room.</p>
+      <div class="form-grid">
+        <div class="field">
+          <label>Phone Number</label>
+          <input type="tel" id="user-phone" placeholder="10-digit number" />
+        </div>
+        <div class="field">
+          <label>Email</label>
+          <input type="email" id="user-email" placeholder="you@example.com" />
+        </div>
       </div>
+
+      <button id="btn-qr" class="btn-pay" disabled>Get payment QR</button>
+      <div id="status-alert" class="status-alert"></div>
+
+      <div id="qr-box" class="qr-box">
+        <img id="qr-img" alt="UPI Payment QR Code" />
+        <p class="qr-note">Scan with any UPI app to lock this seat</p>
+      </div>
+
     </div>
   </main>
 
   <script>
-    const SUPABASE_URL = "https://capwxcexfrrerttbwdut.supabase.co";
-    const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNhcHd4Y2V4ZnJyZXJ0dGJ3ZHV0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODgzNDE4OTksImV4cCI6MjEwMzkxNzg5OX0.aTZpr1nBPjcdeG85fE3uspOR6-md9YeZc-CAtvvCJLA";
+    const SUPABASE_URL = 'https://edqxafyqqkhxuipzcjcd.supabase.co';
+    const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVkcXhhZnlxcWtoeHVpcHpjamNkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODcyOTYzNzIsImV4cCI6MjEwMjg3MjM3Mn0.dAerrc1sTh8CSnY6vZ4NtuvPXWNwjsHCl9gWZ436MLk';
 
-    // Avoid identifier conflict by naming client instance sbClient
-    const sbClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+    const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-    const ticketsGrid = document.getElementById('tickets-grid');
-    const emptyState = document.getElementById('empty-state');
-    const statActive = document.getElementById('stat-active');
-    const statTotal = document.getElementById('stat-total');
-    const statusBadge = document.getElementById('connection-status');
+    const ticketList = document.getElementById('ticket-list');
+    const targetDisplay = document.getElementById('target-display');
+    const btnQr = document.getElementById('btn-qr');
+    const inputPhone = document.getElementById('user-phone');
+    const inputEmail = document.getElementById('user-email');
+    const qrBox = document.getElementById('qr-box');
+    const qrImg = document.getElementById('qr-img');
+    const statusAlert = document.getElementById('status-alert');
 
-    let totalCount = 0;
-    let activeCount = 0;
+    let currentTicket = null;
+    let localClaims = JSON.parse(localStorage.getItem('snipe_claims') || '{}');
 
-    function createTicketCard(ticket) {
-      const lockTimeMs = ticket.snipe_timestamp || Date.now();
-      const holdDurationSec = 8 * 60;
+    // Restore saved credentials
+    inputPhone.value = localStorage.getItem('snipe_phone') || '';
+    inputEmail.value = localStorage.getItem('snipe_email') || '';
 
-      const card = document.createElement('div');
-      card.id = `ticket-${ticket.id}`;
-      card.className = "bg-gray-900 border border-gray-800 rounded-xl p-5 flex flex-col justify-between new-arrival shadow-2xl relative overflow-hidden transition-all duration-300";
+    inputPhone.addEventListener('input', e => localStorage.setItem('snipe_phone', e.target.value.trim()));
+    inputEmail.addEventListener('input', e => localStorage.setItem('snipe_email', e.target.value.trim()));
 
-      const checkoutUrl = `https://in.bookmyshow.com/checkout?transId=${ticket.transaction_id}`;
+    function addCard(ticket, prepend = false) {
+      const existing = document.querySelector(`.ticket-card[data-tid="${ticket.transaction_id}"]`);
+      if (existing) return;
+
+      const firstEmpty = ticketList.querySelector('li');
+      if (firstEmpty && !firstEmpty.classList.contains('ticket-card')) firstEmpty.remove();
+
+      const card = document.createElement('li');
+      card.className = 'ticket-card';
+      card.setAttribute('data-tid', ticket.transaction_id);
 
       card.innerHTML = `
-        <div class="flex items-start justify-between">
-          <div>
-            <span class="text-xs font-mono font-bold uppercase tracking-wider text-red-400 bg-red-950/60 border border-red-800/40 px-2 py-0.5 rounded">
-              ${ticket.attributes || 'DOLBY CINEMA'}
-            </span>
-            <h3 class="text-2xl font-black text-white mt-2">${ticket.seat}</h3>
-            <p class="text-sm text-gray-300 font-semibold">${ticket.event_title || 'Movie Title'}</p>
+        <div class="ticket-main">
+          <div class="t-meta">
+            <span>${ticket.attributes || 'DOLBY CINEMA'}</span>
+            <span>${ticket.show_date_code} • ${ticket.show_time}</span>
           </div>
-          <div class="text-right">
-            <span id="timer-${ticket.id}" class="text-xs font-mono font-bold text-yellow-400 bg-yellow-950/40 border border-yellow-800/30 px-2 py-1 rounded block">
-              08:00
-            </span>
-            <span class="text-[10px] text-gray-500 font-mono mt-1 block">TRANS: ${String(ticket.transaction_id).slice(-6)}</span>
-          </div>
+          <div class="t-title">${ticket.event_title || 'Reserved Movie'}</div>
+          <div class="t-sub">${ticket.event_language || ''} • ${ticket.event_dimension || '2D'}</div>
         </div>
-
-        <div class="my-4 pt-3 border-t border-gray-800/80 grid grid-cols-2 gap-2 text-xs font-mono text-gray-400">
-          <div><span class="text-gray-600">Date:</span> ${ticket.show_date_code}</div>
-          <div><span class="text-gray-600">Time:</span> ${ticket.show_time}</div>
-          <div><span class="text-gray-600">Screen:</span> ${ticket.screen_name || 'Main'}</div>
-          <div><span class="text-gray-600">BookingID:</span> ${ticket.booking_id || 'N/A'}</div>
-        </div>
-
-        <a href="${checkoutUrl}" target="_blank" rel="noopener noreferrer" 
-           class="w-full text-center bg-red-600 hover:bg-red-500 active:bg-red-700 text-white font-bold py-3 px-4 rounded-lg tracking-wider uppercase transition shadow-lg shadow-red-900/30 flex items-center justify-center space-x-2">
-          <span>⚡ GRAB & PAY</span>
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"></path></svg>
-        </a>
+        <div class="ticket-seat-badge">${ticket.seat}</div>
       `;
 
-      const timerElem = card.querySelector(`#timer-${ticket.id}`);
-      const timerInterval = setInterval(() => {
-        const elapsedSec = Math.floor((Date.now() - lockTimeMs) / 1000);
-        const remainingSec = holdDurationSec - elapsedSec;
+      card.onclick = () => {
+        document.querySelectorAll('.ticket-card').forEach(c => c.classList.remove('active'));
+        card.classList.add('active');
+        selectTicket(ticket);
+      };
 
-        if (remainingSec <= 0) {
-          clearInterval(timerInterval);
-          timerElem.innerText = "EXPIRED";
-          timerElem.className = "text-xs font-mono font-bold text-red-500 bg-red-950/60 border border-red-800/50 px-2 py-1 rounded block";
-          card.classList.remove('new-arrival');
-          card.classList.add('opacity-40');
-          activeCount = Math.max(0, activeCount - 1);
-          statActive.innerText = activeCount;
-        } else {
-          const mins = String(Math.floor(remainingSec / 60)).padStart(2, '0');
-          const secs = String(remainingSec % 60).padStart(2, '0');
-          timerElem.innerText = `${mins}:${secs}`;
-        }
-      }, 1000);
-
-      return card;
+      if (prepend) ticketList.prepend(card);
+      else ticketList.appendChild(card);
     }
 
-    function addTicketToUI(ticket) {
-      if (emptyState && emptyState.parentNode) emptyState.remove();
+    function selectTicket(ticket) {
+      currentTicket = ticket;
+      targetDisplay.className = 'target-card';
+      targetDisplay.innerHTML = `
+        <div class="target-main">
+          <div class="t-meta">
+            <span>${ticket.attributes || 'DOLBY CINEMA'}</span>
+            <span>${ticket.show_date_code} • ${ticket.show_time}</span>
+          </div>
+          <div class="t-title" style="font-size:16px;">${ticket.event_title || 'Reserved Movie'}</div>
+          <div class="t-sub">${ticket.event_language || ''} • ${ticket.event_dimension || '2D'}</div>
+        </div>
+        <div class="target-seat">${ticket.seat}</div>
+      `;
 
-      const existingCard = document.getElementById(`ticket-${ticket.id}`);
-      if (existingCard) return;
+      btnQr.disabled = false;
 
-      const card = createTicketCard(ticket);
-      ticketsGrid.prepend(card);
-
-      totalCount++;
-      activeCount++;
-      statTotal.innerText = totalCount;
-      statActive.innerText = activeCount;
-    }
-
-    async function loadInitialTickets() {
-      try {
-        const { data, error } = await sbClient
-          .from('tickets')
-          .select('*')
-          .order('id', { ascending: false })
-          .limit(12);
-
-        if (error) {
-          console.error("Fetch Error:", error);
-          statusBadge.innerText = "Fetch Error (Check RLS)";
-          statusBadge.className = "text-xs font-mono px-3 py-1 rounded bg-red-500/10 text-red-400 border border-red-500/20";
-          return;
-        }
-
-        if (data && data.length > 0) {
-          data.reverse().forEach(ticket => addTicketToUI(ticket));
-        }
-
-        statusBadge.innerText = "● Connected";
-        statusBadge.className = "text-xs font-mono px-3 py-1 rounded bg-green-500/10 text-green-400 border border-green-500/20";
-      } catch (err) {
-        console.error("Init Error:", err);
+      if (localClaims[ticket.transaction_id]) {
+        showQR(localClaims[ticket.transaction_id].qrUrl);
+      } else {
+        qrBox.style.display = 'none';
+        statusAlert.innerText = '';
       }
     }
 
-    function initRealtimeListener() {
-      sbClient
-        .channel('tickets-feed')
-        .on(
-          'postgres_changes',
-          { event: 'INSERT', schema: 'public', table: 'tickets' },
-          (payload) => {
-            console.log("🔥 New Lock Event:", payload.new);
-            addTicketToUI(payload.new);
-          }
-        )
-        .subscribe((status) => {
-          if (status === 'SUBSCRIBED') {
-            statusBadge.innerText = "● Live WebSocket Active";
-            statusBadge.className = "text-xs font-mono px-3 py-1 rounded bg-green-500/10 text-green-400 border border-green-500/20";
-          }
-        });
+    function showQR(url) {
+      qrImg.src = url;
+      qrBox.style.display = 'flex';
+      statusAlert.innerText = 'Seat claimed. QR image valid for 5 minutes.';
+      btnQr.disabled = true;
     }
 
-    loadInitialTickets();
-    initRealtimeListener();
+    btnQr.onclick = () => {
+      if (!currentTicket) return;
+      const tid = currentTicket.transaction_id;
+
+      if (currentTicket.upi_qr_image) {
+        localClaims[tid] = { qrUrl: currentTicket.upi_qr_image, claimedAt: Date.now() };
+        localStorage.setItem('snipe_claims', JSON.stringify(localClaims));
+        supabase.from('tickets').update({ status: 'CLAIMED' }).eq('transaction_id', tid).then();
+        showQR(currentTicket.upi_qr_image);
+      } else {
+        const p = inputPhone.value.trim();
+        const e = inputEmail.value.trim();
+        window.open(`https://in.bookmyshow.com/checkout?transId=${tid}&phone=${p}&email=${e}`, '_blank');
+      }
+    };
+
+    async function init() {
+      const fiveMinsAgo = Date.now() - (5 * 60 * 1000);
+      const { data: tickets } = await supabase
+        .from('tickets')
+        .select('*')
+        .gte('snipe_timestamp', fiveMinsAgo)
+        .order('snipe_timestamp', { ascending: false });
+
+      if (tickets) {
+        tickets.forEach(t => {
+          if (t.status === 'AVAILABLE') addCard(t, false);
+        });
+      }
+
+      supabase.channel('dashboard-feed')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'tickets' }, payload => {
+          if (payload.eventType === 'INSERT' && payload.new.status === 'AVAILABLE') {
+            addCard(payload.new, true);
+          } else if (payload.eventType === 'UPDATE' && payload.new.status === 'CLAIMED') {
+            const tid = payload.new.transaction_id;
+            if (!localClaims[tid]) {
+              const el = document.querySelector(`.ticket-card[data-tid="${tid}"]`);
+              if (el) el.remove();
+              if (currentTicket && currentTicket.transaction_id === tid) {
+                targetDisplay.className = 'target-card empty';
+                targetDisplay.innerText = 'This seat expired — pick another.';
+                btnQr.disabled = true;
+                qrBox.style.display = 'none';
+              }
+            }
+          }
+        })
+        .subscribe();
+    }
+
+    init();
   </script>
 </body>
 </html>
