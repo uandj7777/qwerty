@@ -62,7 +62,7 @@
       background: rgba(0,0,0,0.2);
     }
 
-    /* RIGHT WORKSPACE CONSOLE */
+    /* RIGHT CONSOLE */
     .workspace { flex: 1; display: flex; justify-content: center; align-items: center; padding: 40px; overflow-y: auto; }
     .console { width: 100%; max-width: 480px; display: flex; flex-direction: column; align-items: center; }
 
@@ -173,7 +173,7 @@
       <div id="status-alert" class="status-alert"></div>
 
       <div id="qr-box" class="qr-box">
-        <img id="qr-img" alt="UPI Payment QR Code" />
+        <img id="qr-result" alt="UPI Payment QR Code" />
         <p class="qr-note">Scan with any UPI app to lock this seat</p>
       </div>
 
@@ -192,12 +192,13 @@
     const inputPhone = document.getElementById('user-phone');
     const inputEmail = document.getElementById('user-email');
     const qrBox = document.getElementById('qr-box');
-    const qrImg = document.getElementById('qr-img');
+    const qrResult = document.getElementById('qr-result');
     const statusAlert = document.getElementById('status-alert');
 
     let currentTicket = null;
     let localClaims = JSON.parse(localStorage.getItem('snipe_claims') || '{}');
 
+    // Persistence of credentials
     inputPhone.value = localStorage.getItem('snipe_phone') || '';
     inputEmail.value = localStorage.getItem('snipe_email') || '';
 
@@ -254,6 +255,7 @@
 
       btnQr.disabled = false;
 
+      // Check if ticket was already claimed locally in this browser
       if (localClaims[ticket.transaction_id]) {
         showQR(localClaims[ticket.transaction_id].qrUrl);
       } else {
@@ -263,28 +265,29 @@
     }
 
     function showQR(url) {
-      qrImg.src = url;
+      qrResult.src = url;
       qrBox.style.display = 'flex';
       statusAlert.innerText = 'Seat claimed. QR image valid for 5 minutes.';
       btnQr.disabled = true;
     }
 
+    // Displays the QR on-screen without navigating to external sites
     btnQr.onclick = () => {
       if (!currentTicket) return;
       const tid = currentTicket.transaction_id;
 
-      // Prioritize pre-generated QR from runner; fallback to dynamic VPA schema
-      let qrUrlToDisplay = currentTicket.upi_qr_image;
-      if (!qrUrlToDisplay) {
-        const fallbackIntent = `upi://pay?pa=bookmyshow@icici&pn=BookMyShow&tr=${tid}&tn=BMS_${tid}&cu=INR`;
-        qrUrlToDisplay = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(fallbackIntent)}`;
+      let finalQrUrl = currentTicket.upi_qr_image;
+      if (!finalQrUrl) {
+        // Fallback: Generate dynamic QR matching BookMyShow UPI specifications
+        const upiIntent = `upi://pay?pa=bookmyshow@icici&pn=BookMyShow&tr=${tid}&tn=BMS_${tid}&cu=INR`;
+        finalQrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(upiIntent)}`;
       }
 
-      localClaims[tid] = { qrUrl: qrUrlToDisplay, claimedAt: Date.now() };
+      localClaims[tid] = { qrUrl: finalQrUrl, claimedAt: Date.now() };
       localStorage.setItem('snipe_claims', JSON.stringify(localClaims));
       sbClient.from('tickets').update({ status: 'CLAIMED' }).eq('transaction_id', tid).then();
 
-      showQR(qrUrlToDisplay);
+      showQR(finalQrUrl);
     };
 
     async function init() {
