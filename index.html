@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>BMS Grabroom Live Terminal</title>
   <script src="https://cdn.tailwindcss.com"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://unpkg.com/@supabase/supabase-js@2.39.8/dist/umd/supabase.js"></script>
   <style>
     @keyframes pulse-card {
       0%, 100% { border-color: rgba(239, 68, 68, 0.4); }
@@ -64,7 +64,8 @@
     const SUPABASE_URL = "https://capwxcexfrrerttbwdut.supabase.co";
     const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNhcHd4Y2V4ZnJyZXJ0dGJ3ZHV0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODgzNDE4OTksImV4cCI6MjEwMzkxNzg5OX0.aTZpr1nBPjcdeG85fE3uspOR6-md9YeZc-CAtvvCJLA";
 
-    const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+    // Avoid identifier conflict by naming client instance sbClient
+    const sbClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
     const ticketsGrid = document.getElementById('tickets-grid');
     const emptyState = document.getElementById('empty-state');
@@ -98,7 +99,7 @@
             <span id="timer-${ticket.id}" class="text-xs font-mono font-bold text-yellow-400 bg-yellow-950/40 border border-yellow-800/30 px-2 py-1 rounded block">
               08:00
             </span>
-            <span class="text-[10px] text-gray-500 font-mono mt-1 block">TRANS: ${ticket.transaction_id.slice(-6)}</span>
+            <span class="text-[10px] text-gray-500 font-mono mt-1 block">TRANS: ${String(ticket.transaction_id).slice(-6)}</span>
           </div>
         </div>
 
@@ -140,7 +141,10 @@
     }
 
     function addTicketToUI(ticket) {
-      if (emptyState) emptyState.remove();
+      if (emptyState && emptyState.parentNode) emptyState.remove();
+
+      const existingCard = document.getElementById(`ticket-${ticket.id}`);
+      if (existingCard) return;
 
       const card = createTicketCard(ticket);
       ticketsGrid.prepend(card);
@@ -152,44 +156,49 @@
     }
 
     async function loadInitialTickets() {
-      const { data, error } = await supabase
-        .from('tickets')
-        .select('*')
-        .order('id', { ascending: false })
-        .limit(12);
+      try {
+        const { data, error } = await sbClient
+          .from('tickets')
+          .select('*')
+          .order('id', { ascending: false })
+          .limit(12);
 
-      if (error) {
-        console.error("Error fetching initial tickets:", error);
-        return;
-      }
+        if (error) {
+          console.error("Fetch Error:", error);
+          statusBadge.innerText = "Fetch Error (Check RLS)";
+          statusBadge.className = "text-xs font-mono px-3 py-1 rounded bg-red-500/10 text-red-400 border border-red-500/20";
+          return;
+        }
 
-      if (data && data.length > 0) {
-        data.reverse().forEach(ticket => addTicketToUI(ticket));
+        if (data && data.length > 0) {
+          data.reverse().forEach(ticket => addTicketToUI(ticket));
+        }
+
+        statusBadge.innerText = "● Connected";
+        statusBadge.className = "text-xs font-mono px-3 py-1 rounded bg-green-500/10 text-green-400 border border-green-500/20";
+      } catch (err) {
+        console.error("Init Error:", err);
       }
     }
 
-function initRealtimeListener() {
-  const channel = supabase
-    .channel('tickets-feed')
-    .on(
-      'postgres_changes',
-      { event: 'INSERT', schema: 'public', table: 'tickets' },
-      (payload) => {
-        console.log("🔥 New Snipe Locked:", payload.new);
-        addTicketToUI(payload.new);
-      }
-    )
-    .subscribe((status, err) => {
-      console.log("Realtime status:", status, err);
-      if (status === 'SUBSCRIBED') {
-        statusBadge.innerText = "● Live WebSocket Connected";
-        statusBadge.className = "text-xs font-mono px-3 py-1 rounded bg-green-500/10 text-green-400 border border-green-500/20";
-      } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
-        statusBadge.innerText = "Connection Error";
-        statusBadge.className = "text-xs font-mono px-3 py-1 rounded bg-red-500/10 text-red-400 border border-red-500/20";
-      }
-    });
-}
+    function initRealtimeListener() {
+      sbClient
+        .channel('tickets-feed')
+        .on(
+          'postgres_changes',
+          { event: 'INSERT', schema: 'public', table: 'tickets' },
+          (payload) => {
+            console.log("🔥 New Lock Event:", payload.new);
+            addTicketToUI(payload.new);
+          }
+        )
+        .subscribe((status) => {
+          if (status === 'SUBSCRIBED') {
+            statusBadge.innerText = "● Live WebSocket Active";
+            statusBadge.className = "text-xs font-mono px-3 py-1 rounded bg-green-500/10 text-green-400 border border-green-500/20";
+          }
+        });
+    }
 
     loadInitialTickets();
     initRealtimeListener();
