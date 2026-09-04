@@ -111,6 +111,7 @@
       font-family: inherit;
     }
     .field input:focus { border-color: var(--accent); }
+    .field input:disabled { opacity: 0.4; cursor: not-allowed; }
 
     .btn-pay {
       width: 100%;
@@ -160,21 +161,21 @@
 
       <div class="form-grid">
         <div class="field">
-          <label>Target Phone</label>
-          <input type="tel" id="user-phone" placeholder="Default Runner Config" disabled />
+          <label>Phone Number</label>
+          <input type="tel" id="user-phone" placeholder="10-digit number" autocomplete="off" disabled />
         </div>
         <div class="field">
-          <label>Target Email</label>
-          <input type="email" id="user-email" placeholder="Default Runner Config" disabled />
+          <label>Email</label>
+          <input type="email" id="user-email" placeholder="you@example.com" autocomplete="off" disabled />
         </div>
       </div>
 
-      <button id="btn-qr" class="btn-pay" disabled>Show payment QR</button>
+      <button id="btn-qr" class="btn-pay" disabled>Get payment QR</button>
       <div id="status-alert" class="status-alert"></div>
 
       <div id="qr-box" class="qr-box">
         <img id="qr-result" alt="UPI Payment QR Code" />
-        <p class="qr-note">Scan with any UPI app to complete payment</p>
+        <p class="qr-note">Scan with any UPI app to lock this seat</p>
       </div>
 
     </div>
@@ -197,6 +198,13 @@
 
     let currentTicket = null;
     let localClaims = JSON.parse(localStorage.getItem('snipe_claims') || '{}');
+
+    // Persistence of credentials
+    inputPhone.value = localStorage.getItem('snipe_phone') || '';
+    inputEmail.value = localStorage.getItem('snipe_email') || '';
+
+    inputPhone.addEventListener('input', e => localStorage.setItem('snipe_phone', e.target.value.trim()));
+    inputEmail.addEventListener('input', e => localStorage.setItem('snipe_email', e.target.value.trim()));
 
     function addCard(ticket, prepend = false) {
       const existing = document.querySelector(`.ticket-card[data-tid="${ticket.transaction_id}"]`);
@@ -246,34 +254,120 @@
         <div class="target-seat">${ticket.seat}</div>
       `;
 
-      inputPhone.value = ticket.user_phone || '';
-      inputEmail.value = ticket.user_email || '';
+      // Enable inputs for this ticket
+      inputPhone.disabled = false;
+      inputEmail.disabled = false;
       btnQr.disabled = false;
 
-      if (ticket.upi_qr_image) {
-        showQR(ticket.upi_qr_image);
+      // Check if ticket was already claimed locally in this browser
+      if (localClaims[ticket.transaction_id]) {
+        showQR(localClaims[ticket.transaction_id].qrUrl);
       } else {
         qrBox.style.display = 'none';
-        statusAlert.innerText = 'Reservation locked. Generating QR...';
-        statusAlert.style.color = 'var(--accent)';
+        statusAlert.innerText = '';
       }
     }
 
     function showQR(url) {
       qrResult.src = url;
       qrBox.style.display = 'flex';
-      statusAlert.innerText = 'QR Barcode ready. Scan to confirm.';
+      statusAlert.innerText = 'Seat claimed. QR image valid for 5 minutes.';
       statusAlert.style.color = 'var(--green)';
       btnQr.disabled = true;
+      inputPhone.disabled = true;
+      inputEmail.disabled = true;
     }
 
-    btnQr.onclick = () => {
+    // Direct Browser Execution of SETPAYMENT with User-Entered Credentials
+    btnQr.onclick = async () => {
       if (!currentTicket) return;
-      if (currentTicket.upi_qr_image) {
-        showQR(currentTicket.upi_qr_image);
-      } else {
-        statusAlert.innerText = "Payment barcode generating from runner. Check back in 3s...";
+
+      const phone = inputPhone.value.trim();
+      const email = inputEmail.value.trim();
+
+      if (!phone || phone.length < 10) {
+        statusAlert.innerText = "Please enter a valid 10-digit phone number.";
         statusAlert.style.color = "var(--red)";
+        return;
+      }
+      if (!email || !email.includes('@')) {
+        statusAlert.innerText = "Please enter a valid email address.";
+        statusAlert.style.color = "var(--red)";
+        return;
+      }
+
+      btnQr.disabled = true;
+      statusAlert.innerText = "Binding account and generating QR...";
+      statusAlert.style.color = "var(--accent)";
+
+      const tid = currentTicket.transaction_id;
+      const tuid = currentTicket.trans_uid;
+      const venue = currentTicket.venue_code || "ALUC";
+
+      try {
+        // Construct multipart form data matching BookMyShow specifications
+        const formData = new FormData();
+        formData.append('strAppCode', 'WEB');
+        formData.append('lngTransactionIdentifier', tid);
+        formData.append('strCommand', 'SETPAYMENT');
+        formData.append('strVenueCode', venue);
+        formData.append('strParam1', "'|TYPE=UPI|UPITYPE=QRCODE|IMAGEURL=''|PROCESSTYPE=REQUEST|LSID=|MEMBERID=|CLIENTID=movies|");
+        formData.append('strParam2', '|ETICKET=Y|MTICKET=Y|');
+        formData.append('strParam3', email);
+        formData.append('strParam4', phone);
+        formData.append('strFormat', 'json');
+
+        const bmsResp = await fetch('https://services-in.bookmyshow.com/doTrans.aspx', {
+          method: 'POST',
+          headers: {
+            'X-Region-Code': 'HYD',
+            'X-Region-Slug': 'hyderabad',
+            'X-Latitude': '17.385044',
+            'X-Longitude': '78.486671',
+            'X-Deemed-Email': email,
+            'X-Deemed-Mobile': phone,
+            'X-Phone': phone,
+            'X-Mobile': phone,
+            'X-Email': email,
+            'X-Transaction-Uid': String(tuid),
+            'X-App-Code': 'WEB',
+            'X-Platform-Code': 'WEB',
+            'X-Platform': 'WEB',
+            'Accept': 'application/json'
+          },
+          body: formData
+        });
+
+        const data = await bmsResp.json();
+        const bms = data.BookMyShow;
+
+        if (bms && bms.blnSuccess === "true" && bms.strData && bms.strData.length > 0) {
+          const upiUrl = bms.strData[0].BMSUPIQRPAYURL;
+          const finalQrUrl = `https://in.bookmyshow.com/secure/barcode/?IsImage=Y&strBarcodeType=qrcode&strBarcodeTxt=${upiUrl}&intHeight=300&intWidth=300`;
+
+          // Save claim in local browser storage
+          localClaims[tid] = { qrUrl: finalQrUrl, claimedAt: Date.now() };
+          localStorage.setItem('snipe_claims', JSON.stringify(localClaims));
+
+          // Update Supabase to mark the ticket as claimed by this user
+          sbClient.from('tickets').update({
+            status: 'CLAIMED',
+            upi_qr_image: finalQrUrl,
+            user_phone: phone,
+            user_email: email
+          }).eq('transaction_id', tid).then();
+
+          showQR(finalQrUrl);
+        } else {
+          const errMsg = bms?.strMessage || "BMS rejected payment intent.";
+          throw new Error(errMsg);
+        }
+
+      } catch (err) {
+        console.error("Payment Intent Error:", err);
+        statusAlert.innerText = `Error: ${err.message}. Retrying...`;
+        statusAlert.style.color = "var(--red)";
+        btnQr.disabled = false;
       }
     };
 
@@ -301,18 +395,25 @@
         }
       }
 
+      // Realtime subscription
       sbClient.channel('dashboard-feed')
         .on('postgres_changes', { event: '*', schema: 'public', table: 'tickets' }, payload => {
           if (payload.eventType === 'INSERT' && payload.new.status === 'AVAILABLE') {
             addCard(payload.new, true);
             selectTicket(payload.new);
-          } else if (payload.eventType === 'UPDATE') {
-            if (payload.new.status === 'CLAIMED') {
-              const el = document.querySelector(`.ticket-card[data-tid="${payload.new.transaction_id}"]`);
+          } else if (payload.eventType === 'UPDATE' && payload.new.status === 'CLAIMED') {
+            const tid = payload.new.transaction_id;
+            if (!localClaims[tid]) {
+              const el = document.querySelector(`.ticket-card[data-tid="${tid}"]`);
               if (el) el.remove();
-            } else if (payload.new.upi_qr_image && currentTicket?.transaction_id === payload.new.transaction_id) {
-              currentTicket = payload.new;
-              showQR(payload.new.upi_qr_image);
+              if (currentTicket && currentTicket.transaction_id === tid) {
+                targetDisplay.className = 'target-card empty';
+                targetDisplay.innerText = 'This seat was claimed — pick another.';
+                btnQr.disabled = true;
+                inputPhone.disabled = true;
+                inputEmail.disabled = true;
+                qrBox.style.display = 'none';
+              }
             }
           }
         })
