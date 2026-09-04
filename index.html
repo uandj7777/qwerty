@@ -261,6 +261,11 @@
         showQR(localClaims[ticket.transaction_id].qrUrl);
       } else if (ticket.status === 'QR_READY' && ticket.upi_qr_image) {
         showQR(ticket.upi_qr_image);
+      } else if (ticket.status === 'PROCESSING' || ticket.status === 'GENERATE_QR') {
+        qrBox.style.display = 'none';
+        statusAlert.innerText = 'Binding details and requesting QR from runner...';
+        statusAlert.style.color = 'var(--accent)';
+        btnQr.disabled = true;
       } else {
         qrBox.style.display = 'none';
         statusAlert.innerText = '';
@@ -277,7 +282,7 @@
       inputEmail.disabled = true;
     }
 
-    // DISPATCH SETPAYMENT VIA RUNNER (No browser CORS blocks)
+    // DISPATCH SETPAYMENT VIA RUNNER
     btnQr.onclick = async () => {
       if (!currentTicket) return;
 
@@ -296,6 +301,8 @@
       }
 
       btnQr.disabled = true;
+      inputPhone.disabled = true;
+      inputEmail.disabled = true;
       statusAlert.innerText = "Forwarding to runner to bind account and generate QR...";
       statusAlert.style.color = "var(--accent)";
 
@@ -311,6 +318,8 @@
         statusAlert.innerText = `Database update error: ${error.message}`;
         statusAlert.style.color = "var(--red)";
         btnQr.disabled = false;
+        inputPhone.disabled = false;
+        inputEmail.disabled = false;
       }
     };
 
@@ -330,7 +339,9 @@
 
       if (tickets && tickets.length > 0) {
         tickets.reverse().forEach(t => {
-          if (t.status === 'AVAILABLE' || t.status === 'QR_READY') addCard(t, false);
+          if (t.status === 'AVAILABLE' || t.status === 'QR_READY' || t.status === 'PROCESSING') {
+            addCard(t, false);
+          }
         });
         const activeCards = document.querySelectorAll('.ticket-card');
         if (activeCards.length > 0) {
@@ -349,6 +360,12 @@
               localClaims[updated.transaction_id] = { qrUrl: updated.upi_qr_image, claimedAt: Date.now() };
               localStorage.setItem('snipe_claims', JSON.stringify(localClaims));
               showQR(updated.upi_qr_image);
+            } else if (updated.status === 'QR_FAILED' && currentTicket?.transaction_id === updated.transaction_id) {
+              statusAlert.innerText = "BMS rejected payment intent for this hold. Seat expired or invalid.";
+              statusAlert.style.color = "var(--red)";
+              btnQr.disabled = false;
+              inputPhone.disabled = false;
+              inputEmail.disabled = false;
             } else if (updated.status === 'CLAIMED' && !localClaims[updated.transaction_id]) {
               const el = document.querySelector(`.ticket-card[data-tid="${updated.transaction_id}"]`);
               if (el) el.remove();
