@@ -175,7 +175,7 @@
 
       <div id="qr-box" class="qr-box">
         <img id="qr-result" alt="UPI Payment QR Code" />
-        <p class="qr-note">Scan with any UPI app to lock this seat</p>
+        <p class="qr-note">Scan with any UPI app to complete booking</p>
       </div>
 
     </div>
@@ -199,7 +199,6 @@
     let currentTicket = null;
     let localClaims = JSON.parse(localStorage.getItem('snipe_claims') || '{}');
 
-    // Persistence of credentials
     inputPhone.value = localStorage.getItem('snipe_phone') || '';
     inputEmail.value = localStorage.getItem('snipe_email') || '';
 
@@ -254,14 +253,14 @@
         <div class="target-seat">${ticket.seat}</div>
       `;
 
-      // Enable inputs for this ticket
       inputPhone.disabled = false;
       inputEmail.disabled = false;
       btnQr.disabled = false;
 
-      // Check if ticket was already claimed locally in this browser
       if (localClaims[ticket.transaction_id]) {
         showQR(localClaims[ticket.transaction_id].qrUrl);
+      } else if (ticket.status === 'QR_READY' && ticket.upi_qr_image) {
+        showQR(ticket.upi_qr_image);
       } else {
         qrBox.style.display = 'none';
         statusAlert.innerText = '';
@@ -271,14 +270,14 @@
     function showQR(url) {
       qrResult.src = url;
       qrBox.style.display = 'flex';
-      statusAlert.innerText = 'Seat claimed. QR image valid for 5 minutes.';
+      statusAlert.innerText = 'Official UPI Barcode ready. Valid for 5 minutes.';
       statusAlert.style.color = 'var(--green)';
       btnQr.disabled = true;
       inputPhone.disabled = true;
       inputEmail.disabled = true;
     }
 
-    // Direct Browser Execution of SETPAYMENT with User-Entered Credentials
+    // DISPATCH SETPAYMENT VIA RUNNER (No browser CORS blocks)
     btnQr.onclick = async () => {
       if (!currentTicket) return;
 
@@ -297,75 +296,19 @@
       }
 
       btnQr.disabled = true;
-      statusAlert.innerText = "Binding account and generating QR...";
+      statusAlert.innerText = "Forwarding to runner to bind account and generate QR...";
       statusAlert.style.color = "var(--accent)";
 
       const tid = currentTicket.transaction_id;
-      const tuid = currentTicket.trans_uid;
-      const venue = currentTicket.venue_code || "ALUC";
 
-      try {
-        // Construct multipart form data matching BookMyShow specifications
-        const formData = new FormData();
-        formData.append('strAppCode', 'WEB');
-        formData.append('lngTransactionIdentifier', tid);
-        formData.append('strCommand', 'SETPAYMENT');
-        formData.append('strVenueCode', venue);
-        formData.append('strParam1', "'|TYPE=UPI|UPITYPE=QRCODE|IMAGEURL=''|PROCESSTYPE=REQUEST|LSID=|MEMBERID=|CLIENTID=movies|");
-        formData.append('strParam2', '|ETICKET=Y|MTICKET=Y|');
-        formData.append('strParam3', email);
-        formData.append('strParam4', phone);
-        formData.append('strFormat', 'json');
+      const { error } = await sbClient.from('tickets').update({
+        status: 'GENERATE_QR',
+        user_phone: phone,
+        user_email: email
+      }).eq('transaction_id', tid);
 
-        const bmsResp = await fetch('https://services-in.bookmyshow.com/doTrans.aspx', {
-          method: 'POST',
-          headers: {
-            'X-Region-Code': 'HYD',
-            'X-Region-Slug': 'hyderabad',
-            'X-Latitude': '17.385044',
-            'X-Longitude': '78.486671',
-            'X-Deemed-Email': email,
-            'X-Deemed-Mobile': phone,
-            'X-Phone': phone,
-            'X-Mobile': phone,
-            'X-Email': email,
-            'X-Transaction-Uid': String(tuid),
-            'X-App-Code': 'WEB',
-            'X-Platform-Code': 'WEB',
-            'X-Platform': 'WEB',
-            'Accept': 'application/json'
-          },
-          body: formData
-        });
-
-        const data = await bmsResp.json();
-        const bms = data.BookMyShow;
-
-        if (bms && bms.blnSuccess === "true" && bms.strData && bms.strData.length > 0) {
-          const upiUrl = bms.strData[0].BMSUPIQRPAYURL;
-          const finalQrUrl = `https://in.bookmyshow.com/secure/barcode/?IsImage=Y&strBarcodeType=qrcode&strBarcodeTxt=${upiUrl}&intHeight=300&intWidth=300`;
-
-          // Save claim in local browser storage
-          localClaims[tid] = { qrUrl: finalQrUrl, claimedAt: Date.now() };
-          localStorage.setItem('snipe_claims', JSON.stringify(localClaims));
-
-          // Update Supabase to mark the ticket as claimed by this user
-          sbClient.from('tickets').update({
-            status: 'CLAIMED',
-            upi_qr_image: finalQrUrl,
-            user_phone: phone,
-            user_email: email
-          }).eq('transaction_id', tid).then();
-
-          showQR(finalQrUrl);
-        } else {
-          const errMsg = bms?.strMessage || "BMS rejected payment intent.";
-          throw new Error(errMsg);
-        }
-
-      } catch (err) {
-        console.error("Payment Intent Error:", err);
-        statusAlert.innerText = `Error: ${err.message}. Retrying...`;
+      if (error) {
+        statusAlert.innerText = `Database update error: ${error.message}`;
         statusAlert.style.color = "var(--red)";
         btnQr.disabled = false;
       }
@@ -387,7 +330,7 @@
 
       if (tickets && tickets.length > 0) {
         tickets.reverse().forEach(t => {
-          if (t.status === 'AVAILABLE') addCard(t, false);
+          if (t.status === 'AVAILABLE' || t.status === 'QR_READY') addCard(t, false);
         });
         const activeCards = document.querySelectorAll('.ticket-card');
         if (activeCards.length > 0) {
@@ -395,25 +338,20 @@
         }
       }
 
-      // Realtime subscription
       sbClient.channel('dashboard-feed')
         .on('postgres_changes', { event: '*', schema: 'public', table: 'tickets' }, payload => {
           if (payload.eventType === 'INSERT' && payload.new.status === 'AVAILABLE') {
             addCard(payload.new, true);
             selectTicket(payload.new);
-          } else if (payload.eventType === 'UPDATE' && payload.new.status === 'CLAIMED') {
-            const tid = payload.new.transaction_id;
-            if (!localClaims[tid]) {
-              const el = document.querySelector(`.ticket-card[data-tid="${tid}"]`);
+          } else if (payload.eventType === 'UPDATE') {
+            const updated = payload.new;
+            if (updated.status === 'QR_READY' && currentTicket?.transaction_id === updated.transaction_id) {
+              localClaims[updated.transaction_id] = { qrUrl: updated.upi_qr_image, claimedAt: Date.now() };
+              localStorage.setItem('snipe_claims', JSON.stringify(localClaims));
+              showQR(updated.upi_qr_image);
+            } else if (updated.status === 'CLAIMED' && !localClaims[updated.transaction_id]) {
+              const el = document.querySelector(`.ticket-card[data-tid="${updated.transaction_id}"]`);
               if (el) el.remove();
-              if (currentTicket && currentTicket.transaction_id === tid) {
-                targetDisplay.className = 'target-card empty';
-                targetDisplay.innerText = 'This seat was claimed — pick another.';
-                btnQr.disabled = true;
-                inputPhone.disabled = true;
-                inputEmail.disabled = true;
-                qrBox.style.display = 'none';
-              }
             }
           }
         })
