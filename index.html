@@ -143,7 +143,7 @@
       <h2>Available Seats</h2>
       <div class="live-indicator">
         <span class="dot"></span>
-        <span id="conn-state">LIVE</span>
+        <span id="conn-state">CONNECTING</span>
       </div>
     </div>
     <ul id="ticket-list">
@@ -198,7 +198,7 @@
     let currentTicket = null;
     let localClaims = JSON.parse(localStorage.getItem('snipe_claims') || '{}');
 
-    // Persistence of credentials
+    // Persistence of user credentials
     inputPhone.value = localStorage.getItem('snipe_phone') || '';
     inputEmail.value = localStorage.getItem('snipe_email') || '';
 
@@ -255,7 +255,6 @@
 
       btnQr.disabled = false;
 
-      // Check if ticket was already claimed locally in this browser
       if (localClaims[ticket.transaction_id]) {
         showQR(localClaims[ticket.transaction_id].qrUrl);
       } else {
@@ -271,43 +270,51 @@
       btnQr.disabled = true;
     }
 
-    // Displays the QR on-screen without navigating to external sites
     btnQr.onclick = () => {
       if (!currentTicket) return;
       const tid = currentTicket.transaction_id;
 
-      let finalQrUrl = currentTicket.upi_qr_image;
-      if (!finalQrUrl) {
-        // Fallback: Generate dynamic QR matching BookMyShow UPI specifications
-        const upiIntent = `upi://pay?pa=bookmyshow@icici&pn=BookMyShow&tr=${tid}&tn=BMS_${tid}&cu=INR`;
-        finalQrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(upiIntent)}`;
+      if (currentTicket.upi_qr_image) {
+        localClaims[tid] = { qrUrl: currentTicket.upi_qr_image, claimedAt: Date.now() };
+        localStorage.setItem('snipe_claims', JSON.stringify(localClaims));
+        sbClient.from('tickets').update({ status: 'CLAIMED' }).eq('transaction_id', tid).then();
+        showQR(currentTicket.upi_qr_image);
+      } else {
+        statusAlert.innerText = "Payment barcode generating... please wait.";
       }
-
-      localClaims[tid] = { qrUrl: finalQrUrl, claimedAt: Date.now() };
-      localStorage.setItem('snipe_claims', JSON.stringify(localClaims));
-      sbClient.from('tickets').update({ status: 'CLAIMED' }).eq('transaction_id', tid).then();
-
-      showQR(finalQrUrl);
     };
 
     async function init() {
-      const fiveMinsAgo = Date.now() - (5 * 60 * 1000);
-      const { data: tickets } = await sbClient
+      // Direct limit fetch without restrictive timestamp gating
+      const { data: tickets, error } = await sbClient
         .from('tickets')
         .select('*')
-        .gte('snipe_timestamp', fiveMinsAgo)
-        .order('snipe_timestamp', { ascending: false });
+        .order('id', { ascending: false })
+        .limit(15);
 
-      if (tickets) {
-        tickets.forEach(t => {
-          if (t.status === 'AVAILABLE') addCard(t, false);
-        });
+      if (error) {
+        document.getElementById('conn-state').innerText = "ERROR";
+        return;
       }
 
+      document.getElementById('conn-state').innerText = "LIVE";
+
+      if (tickets && tickets.length > 0) {
+        tickets.reverse().forEach(t => {
+          if (t.status === 'AVAILABLE') addCard(t, false);
+        });
+        const activeCards = document.querySelectorAll('.ticket-card');
+        if (activeCards.length > 0) {
+          activeCards[activeCards.length - 1].click();
+        }
+      }
+
+      // Realtime subscription
       sbClient.channel('dashboard-feed')
         .on('postgres_changes', { event: '*', schema: 'public', table: 'tickets' }, payload => {
           if (payload.eventType === 'INSERT' && payload.new.status === 'AVAILABLE') {
             addCard(payload.new, true);
+            selectTicket(payload.new);
           } else if (payload.eventType === 'UPDATE' && payload.new.status === 'CLAIMED') {
             const tid = payload.new.transaction_id;
             if (!localClaims[tid]) {
